@@ -28,10 +28,13 @@ interface CalledTicketOverlayProps {
   ticketServiceName?: string;
   distanceInfo: DistanceInfo | null;
   countdownSeconds: number;
+  countdownReady?: boolean;
   callTimeoutMinutes?: number | null;
   hasRecalled: boolean;
   isSwapped?: boolean;
   gracePeriodExpiresAt?: string | null;
+  absentLevel?: number;
+  maxCallAttempts?: number;
   onEnRoute: () => void;
   onPresent?: () => Promise<void> | void;
   onRecall: () => Promise<void>;
@@ -46,10 +49,13 @@ export const CalledTicketOverlay: React.FC<CalledTicketOverlayProps> = ({
   ticketNumber,
   ticketServiceName,
   countdownSeconds,
+  countdownReady = true,
   callTimeoutMinutes,
   hasRecalled,
   isSwapped = false,
   gracePeriodExpiresAt,
+  absentLevel = 0,
+  maxCallAttempts = 2,
   onEnRoute,
   onPresent,
   onRecall,
@@ -184,12 +190,17 @@ export const CalledTicketOverlay: React.FC<CalledTicketOverlayProps> = ({
                   <Ionicons name="notifications" size={36} color="#FFF" />
                 </View>
               </Animated.View>
-              <Text style={styles.title}>C'est votre tour !</Text>
-              {counterNumber && (
+              <Text style={styles.title}>{absentLevel > 0 ? "Dernier appel !" : "C'est votre tour !"}</Text>
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 6, flexWrap: "wrap", justifyContent: "center" }}>
                 <View style={[styles.counterBadge, { backgroundColor: "rgba(255,255,255,0.2)" }]}>
-                  <Text style={styles.counterText}>Guichet {counterNumber}</Text>
+                  <Text style={styles.counterText}>Appel {absentLevel + 1}/{maxCallAttempts}</Text>
                 </View>
-              )}
+                {counterNumber && (
+                  <View style={[styles.counterBadge, { backgroundColor: "rgba(255,255,255,0.2)" }]}>
+                    <Text style={styles.counterText}>Guichet {counterNumber}</Text>
+                  </View>
+                )}
+              </View>
             </View>
 
             {/* Infos ticket compactes */}
@@ -211,7 +222,12 @@ export const CalledTicketOverlay: React.FC<CalledTicketOverlayProps> = ({
 
             {/* Timer */}
             <View style={styles.timerArea}>
-              {isExpired ? (
+              {!countdownReady ? (
+                <View style={[styles.expiredBox, { backgroundColor: "rgba(255,255,255,0.1)" }]}>
+                  <Text style={styles.expiredTitle}>Chargement...</Text>
+                  <Text style={styles.expiredSub}>Synchronisation du délai en cours</Text>
+                </View>
+              ) : isExpired ? (
                 <View style={styles.expiredBox}>
                   <Text style={styles.expiredTitle}>Délai expiré</Text>
                   <Text style={styles.expiredSub}>Ticket marqué absent automatiquement</Text>

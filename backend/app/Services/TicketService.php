@@ -197,11 +197,14 @@ class TicketService
                 }
             }
 
-            // Empêcher plusieurs tickets actifs pour le même service et utilisateur
             $already = Ticket::query()
                 ->where('user_id', $user->id)
                 ->where('service_id', $serviceId)
                 ->whereIn('status', ['waiting','called','en_route','present','absent'])
+                ->where(function ($q) {
+                    $q->whereNull('absent_expires_at')
+                      ->orWhere('status', '!=', 'absent');
+                })
                 ->exists();
             if ($already) {
                 abort(422, 'You already have an active ticket for this service');
@@ -994,7 +997,7 @@ class TicketService
     /**
      * Rappelle un ticket (repasse en called si toujours éligible).
      */
-    public function recall(Ticket $ticket): Ticket
+    public function recall(Ticket $ticket, ?int $counterId = null): Ticket
     {
         $this->expireOldTicketsForServiceId($ticket->service_id);
 
@@ -1013,6 +1016,9 @@ class TicketService
         $ticket->present_at = null;
         $ticket->response_received_at = null;
         $ticket->en_route_expires_at = null;
+        if (!is_null($counterId)) {
+            $ticket->counter_id = $counterId;
+        }
         $ticket->called_at = Carbon::now();
         $ticket->called_expires_at = Carbon::now()->addMinutes($timeoutMinutes);
         $ticket->position = null;
