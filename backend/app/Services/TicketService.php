@@ -578,6 +578,11 @@ class TicketService
     {
         $this->expireOldTicketsForServiceId($ticket->service_id);
 
+        // Éviter le double-traitement (race avec le scheduler)
+        if ($ticket->status === 'absent') {
+            return $ticket;
+        }
+
         $service = $ticket->service;
         $maxAttempts = (int) ($service?->max_call_attempts ?? 2);
 
@@ -633,15 +638,15 @@ class TicketService
             if ($newLevel < $maxAttempts) {
                 dispatch(new SendPushNotification(
                     $ticket->user->id,
-                    'Ticket marqué absent',
-                    "Le ticket {$ticket->number} est marqué absent. L'agent peut vous rappeler.",
+                    'Absence temporaire',
+                    "Vous ne vous êtes pas présenté à temps. Votre ticket {$ticket->number} a été marqué absent mais peut encore être rappelé.",
                     ['ticket_id' => $ticket->id, 'service_id' => $ticket->service_id, 'type' => 'absent_first']
                 ));
             } else {
                 dispatch(new SendPushNotification(
                     $ticket->user->id,
                     'Absence définitive',
-                    "Le ticket {$ticket->number} est absent définitivement. Il sera supprimé à l'expiration du délai.",
+                    "Votre ticket {$ticket->number} a été clôturé suite à plusieurs absences. Vous devez prendre un nouveau ticket.",
                     ['ticket_id' => $ticket->id, 'service_id' => $ticket->service_id, 'type' => 'absent_definitive']
                 ));
             }
@@ -666,6 +671,11 @@ class TicketService
      */
     public function permanentlyExpireAbsent(Ticket $ticket): Ticket
     {
+        // Éviter le double-traitement
+        if ($ticket->status === 'closed') {
+            return $ticket;
+        }
+
         $ticket->status             = 'closed';
         $ticket->closed_at          = Carbon::now();
         $ticket->position           = null;
@@ -693,8 +703,8 @@ class TicketService
 
             dispatch(new SendPushNotification(
                 $ticket->user->id,
-                'Ticket supprimé',
-                "Le ticket {$ticket->number} a été définitivement supprimé suite à une absence répétée.",
+                'Ticket clôturé',
+                "Votre ticket {$ticket->number} a été clôturé suite à plusieurs absences. Vous devez prendre un nouveau ticket.",
                 ['ticket_id' => $ticket->id, 'service_id' => $ticket->service_id, 'type' => 'expired_absent']
             ));
         }
