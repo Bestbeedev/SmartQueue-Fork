@@ -69,6 +69,7 @@ type QueueTicket = {
   en_route_expires_at?: string | null;
   called_expires_at?: string | null;
   is_swapped?: boolean;
+  deferral_count?: number;
   deferred_at?: string | null;
   swapped_with_ticket_id?: number | null;
   auto_deferred?: boolean;
@@ -523,12 +524,14 @@ const Queues: React.FC = () => {
     }
   };
 
-  const markAbsent = async (ticketId: number) => {
+  const markAbsent = async (ticket: QueueTicket) => {
     setIsActing(true);
     setError("");
     try {
       await api.post(`/api/tickets/${ticketId}/mark-absent`);
-      toast.success("Ticket marqué absent", { description: "L'usager a été notifié" });
+      toast.success("Ticket marqué absent", {
+        description: "L'usager a été notifié",
+      });
       await refreshQueueAndStats();
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || "Erreur");
@@ -1002,10 +1005,69 @@ const Queues: React.FC = () => {
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap">
                                   <div className="flex gap-2">
-                                    <button type="button" onClick={() => callNext()} disabled={isActing || t.status !== "waiting"} className={cn("inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all", isActing || t.status !== "waiting" ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed" : "bg-green-600 text-white hover:bg-green-700 shadow-sm")} title="Appeler ce ticket"><Phone className="h-3.5 w-3.5" />Appeler</button>
-                                    <button type="button" onClick={() => recall(Number(t.id))} disabled={isActing || t.status === "waiting" || t.status === "closed"} className={cn("inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all", isActing || t.status === "waiting" || t.status === "closed" ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed" : "bg-blue-600 text-white hover:bg-blue-700 shadow-sm")} title="Rappeler ce ticket"><Volume2 className="h-3.5 w-3.5" />Rappel</button>
-                                    <button type="button" onClick={() => markAbsent(Number(t.id))} disabled={isActing || t.status !== "called"} className={cn("inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all", isActing || t.status !== "called" ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed" : "bg-orange-600 text-white hover:bg-orange-700 shadow-sm")} title="Marquer comme absent"><UserX className="h-3.5 w-3.5" />Absent</button>
-                                    <button type="button" onClick={() => closeTicket(Number(t.id))} disabled={isActing || t.status !== "called"} className={cn("inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all", isActing || t.status !== "called" ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed" : "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm")} title="Clôturer le ticket"><CheckCircle className="h-3.5 w-3.5" />Servi</button>
+                                    <button
+                                      type="button"
+                                      onClick={() => callNext()}
+                                      disabled={isActing || t.status !== "waiting"}
+                                      className={cn(
+                                        "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                                        isActing || t.status !== "waiting"
+                                          ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed"
+                                          : "bg-green-600 text-white hover:bg-green-700 shadow-sm"
+                                      )}
+                                      title="Appeler ce ticket"
+                                    >
+                                      <Phone className="h-3.5 w-3.5" />
+                                      Appeler
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => recall(Number(t.id))}
+                                      disabled={isActing || t.status === "waiting" || t.status === "closed"}
+                                      className={cn(
+                                        "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                                        isActing || t.status === "waiting" || t.status === "closed"
+                                          ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed"
+                                          : "bg-blue-600 text-white hover:bg-blue-700 shadow-sm"
+                                      )}
+                                      title="Rappeler ce ticket"
+                                    >
+                                      <Volume2 className="h-3.5 w-3.5" />
+                                      Rappel
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => markAbsent(Number(t.id))}
+                                      disabled={isActing || t.status !== "called"}
+                                      className={cn(
+                                        "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                                        isActing || t.status !== "called"
+                                          ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed"
+                                          : "bg-orange-600 text-white hover:bg-orange-700 shadow-sm"
+                                      )}
+                                      title="Marquer comme absent"
+                                    >
+                                      <UserX className="h-3.5 w-3.5" />
+                                      Absent
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => closeTicket(Number(t.id))}
+                                      disabled={isActing || t.status !== "called"}
+                                      className={cn(
+                                        "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                                        isActing || t.status !== "called"
+                                          ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed"
+                                          : "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm"
+                                      )}
+                                      title="Clôturer le ticket"
+                                    >
+                                      <CheckCircle className="h-3.5 w-3.5" />
+                                      Servi
+                                    </button>
                                   </div>
                                 </td>
                               </tr>
