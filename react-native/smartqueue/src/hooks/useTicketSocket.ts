@@ -41,16 +41,21 @@ interface TicketCalledEvent {
 interface TicketUpdatedEvent {
   ticket_id: number;
   status?: string;
+  reason?: string;
   position?: number;
   eta_minutes?: number;
   counter_id?: number;
   is_swapped?: boolean;
   deferred?: boolean;
+  absent_level?: number;
+  recall_possible?: boolean;
+  absent_expires_at?: string;
 }
 
 interface UserTicketUpdatedEvent {
   ticket_id: number;
   status?: string;
+  reason?: string;
   position?: number;
   eta_minutes?: number;
   counter_id?: number;
@@ -58,6 +63,9 @@ interface UserTicketUpdatedEvent {
   number?: string;
   deferred?: boolean;
   swapped?: boolean;
+  absent_level?: number;
+  recall_possible?: boolean;
+  absent_expires_at?: string;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -218,8 +226,8 @@ export const useTicketSocket = (ticketId: string | number | null) => {
           if (data.ticket_id !== numericTicketId) return;
 
           const counterNum = data.counter ?? data.counter_id;
-          markAsCalled(counterNum?.toString());
           updateTicketStatus("called", numericTicketId);
+          markAsCalled(counterNum?.toString());
           setLastUpdate(new Date());
 
           triggerHapticFeedback("success");
@@ -234,7 +242,12 @@ export const useTicketSocket = (ticketId: string | number | null) => {
           setLastUpdate(new Date());
 
           if (data.status) {
-            updateTicketStatus(data.status as any, numericTicketId);
+            const extra: Record<string, any> = {};
+            if (data.absent_level !== undefined) extra.absent_level = data.absent_level;
+            if (data.absent_expires_at !== undefined) extra.absent_expires_at = data.absent_expires_at;
+            if (data.recall_possible !== undefined) extra.recall_possible = data.recall_possible;
+            if (data.counter_id !== undefined) extra.counter_id = data.counter_id;
+            updateTicketStatus(data.status as any, numericTicketId, extra as any);
 
             switch (data.status) {
               case "called": {
@@ -242,15 +255,33 @@ export const useTicketSocket = (ticketId: string | number | null) => {
                 triggerHapticFeedback("success");
                 break;
               }
-              case "absent":
-                triggerLocalNotification(
-                  "Ticket absent",
-                  "Vous avez été marqué absent",
-                  numericTicketId,
-                );
+              case "absent": {
+                const absLevel = data.absent_level ?? 1;
+                const title = absLevel < 2 ? "Ticket absent" : "Absence définitive";
+                const body = absLevel < 2
+                  ? "Vous avez été marqué absent — l'agent peut vous rappeler"
+                  : "Absence définitive — le ticket sera supprimé à l'expiration du délai";
+                triggerLocalNotification(title, body, numericTicketId);
                 triggerHapticFeedback("warning");
                 break;
+              }
               case "closed":
+                if (data.reason === 'expired_absent') {
+                  triggerLocalNotification(
+                    "Ticket supprimé",
+                    "Le ticket a été définitivement supprimé suite à une absence répétée.",
+                    numericTicketId,
+                  );
+                  triggerHapticFeedback("warning");
+                } else {
+                  triggerLocalNotification(
+                    "Service terminé",
+                    "Votre ticket a été servi. Merci !",
+                    numericTicketId,
+                  );
+                  triggerHapticFeedback("success");
+                }
+                break;
               case "served":
                 triggerLocalNotification(
                   "Service terminé",
@@ -295,7 +326,12 @@ export const useTicketSocket = (ticketId: string | number | null) => {
             setLastUpdate(new Date());
 
             if (data.status) {
-              updateTicketStatus(data.status as any, numericTicketId);
+              const extra: Record<string, any> = {};
+              if (data.absent_level !== undefined) extra.absent_level = data.absent_level;
+              if (data.absent_expires_at !== undefined) extra.absent_expires_at = data.absent_expires_at;
+              if (data.recall_possible !== undefined) extra.recall_possible = data.recall_possible;
+              if (data.counter_id !== undefined) extra.counter_id = data.counter_id;
+              updateTicketStatus(data.status as any, numericTicketId, extra as any);
 
               switch (data.status) {
                 case "called": {
@@ -303,14 +339,16 @@ export const useTicketSocket = (ticketId: string | number | null) => {
                   triggerHapticFeedback("success");
                   break;
                 }
-                case "absent":
-                  triggerLocalNotification(
-                    "Ticket absent",
-                    "Vous avez été marqué absent",
-                    numericTicketId,
-                  );
+                case "absent": {
+                  const absLevel = data.absent_level ?? 1;
+                  const absTitle = absLevel < 2 ? "Ticket absent" : "Absence définitive";
+                  const absBody = absLevel < 2
+                    ? "Vous avez été marqué absent — l'agent peut vous rappeler"
+                    : "Absence définitive — le ticket sera supprimé à l'expiration du délai";
+                  triggerLocalNotification(absTitle, absBody, numericTicketId);
                   triggerHapticFeedback("warning");
                   break;
+                }
                 case "waiting":
                   // Mise à jour silencieuse de position — pas de notification
                   break;

@@ -60,14 +60,17 @@ class TicketResource extends JsonResource
             'auto_deferred' => (bool) $this->auto_deferred,
             'defer_reason' => $this->defer_reason,
             'valid_date' => $this->valid_date?->toDateString(),
-            'deferral_count'  => (int) ($this->deferral_count ?? 0),
-            'recall_possible' => ($this->status === 'absent') && ($this->deferral_count ?? 0) < 2,
+            'absent_level'     => (int) ($this->absent_level ?? 0),
+            'absent_expires_at'=> optional($this->absent_expires_at)->toIso8601String(),
+            'deferral_count'   => (int) ($this->deferral_count ?? 0),
+            'max_call_attempts' => (int) ($this->service?->max_call_attempts ?? 2),
+            'recall_possible'  => ($this->status === 'absent') && ($this->absent_level ?? 0) < (int) ($this->service?->max_call_attempts ?? 2),
             'called_at'       => $this->called_at,
             'called_expires_at' => optional($this->called_expires_at)->toIso8601String(),
             'closed_at' => $this->closed_at,
             'present_at' => $this->present_at,
             'response_received_at' => $this->response_received_at,
-            'en_route_expires_at' => $this->en_route_expires_at,
+            'en_route_expires_at' => optional($this->en_route_expires_at)->toIso8601String(),
             // Exposé pour que le mobile sache si l'utilisateur a déjà répondu à
             // l'appel (statut reste 'called' après "en route") et n'affiche pas
             // l'overlay à nouveau.
@@ -85,6 +88,7 @@ class TicketResource extends JsonResource
                 'name' => $this->service->name,
                 'status' => $this->service->status,
                 'avg_service_time_minutes' => $this->service->avg_service_time_minutes,
+                'max_call_attempts' => (int) ($this->service->max_call_attempts ?? 2),
             ] : null,
             // Résumé de l'établissement avec coordonnées
             'establishment' => ($this->service && $this->service->establishment) ? [

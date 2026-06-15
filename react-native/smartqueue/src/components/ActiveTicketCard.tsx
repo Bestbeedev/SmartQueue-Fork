@@ -21,6 +21,11 @@ import type { Ticket } from "../api/ticketsApi";
 
 const { width } = Dimensions.get("window");
 
+const parseExpiry = (s: string): number => {
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s) ? s.replace(' ', 'T') + 'Z' : s;
+  return new Date(normalized).getTime();
+};
+
 interface ActiveTicketCardProps {
   ticket?: Ticket;
   onPress?: () => void;
@@ -83,31 +88,36 @@ export const ActiveTicketCard: React.FC<ActiveTicketCardProps> = ({
 
   const [localStatus, setLocalStatus] = useState(activeTicket?.status);
   const [localDeferralCount, setLocalDeferralCount] = useState(activeTicket?.deferral_count ?? 0);
+  const [localAbsentLevel, setLocalAbsentLevel] = useState(activeTicket?.absent_level ?? 0);
   const [calledExpiresAt, setCalledExpiresAt] = useState((activeTicket as any)?.called_expires_at);
   const [enRouteExpiresAt, setEnRouteExpiresAt] = useState(activeTicket?.en_route_expires_at);
+  const [absentExpiresAt, setAbsentExpiresAt] = useState(activeTicket?.absent_expires_at);
 
   useEffect(() => {
     const newCalledExp = (activeTicket as any)?.called_expires_at;
     const newEnRouteExp = activeTicket?.en_route_expires_at;
+    const newAbsentExp = activeTicket?.absent_expires_at;
     const newStatus = activeTicket?.status;
     setLocalStatus(newStatus);
     setLocalDeferralCount(activeTicket?.deferral_count ?? 0);
+    setLocalAbsentLevel(activeTicket?.absent_level ?? 0);
     setCalledExpiresAt(newCalledExp);
     setEnRouteExpiresAt(newEnRouteExp);
+    setAbsentExpiresAt(newAbsentExp);
 
     const now = Date.now();
     const alreadyExpired =
       (newStatus === "called" && newCalledExp && new Date(newCalledExp).getTime() <= now) ||
       (newStatus === "en_route" && newEnRouteExp && new Date(newEnRouteExp).getTime() <= now);
     alertShownRef.current = !!alreadyExpired;
-  }, [activeTicket?.id, activeTicket?.status, activeTicket?.deferral_count]);
+  }, [activeTicket?.id, activeTicket?.status, activeTicket?.absent_level, activeTicket?.deferral_count, (activeTicket as any)?.called_expires_at, activeTicket?.en_route_expires_at, activeTicket?.absent_expires_at]);
 
-  const isCalledExpired = localStatus === "called" && calledExpiresAt 
-    ? new Date(calledExpiresAt).getTime() <= Date.now()
+  const isCalledExpired = localStatus === "called" && calledExpiresAt
+    ? parseExpiry(calledExpiresAt) <= Date.now()
     : false;
 
   const isEnRouteExpired = localStatus === "en_route" && enRouteExpiresAt
-    ? new Date(enRouteExpiresAt).getTime() <= Date.now()
+    ? parseExpiry(enRouteExpiresAt) <= Date.now()
     : false;
 
   const handleTicketExpired = useCallback(() => {
@@ -145,9 +155,9 @@ export const ActiveTicketCard: React.FC<ActiveTicketCardProps> = ({
       let expired = false;
 
       if (localStatus === "called" && calledExpiresAt) {
-        expired = new Date(calledExpiresAt).getTime() <= now;
+        expired = parseExpiry(calledExpiresAt) <= now;
       } else if (localStatus === "en_route" && enRouteExpiresAt) {
-        expired = new Date(enRouteExpiresAt).getTime() <= now;
+        expired = parseExpiry(enRouteExpiresAt) <= now;
       }
 
       if (expired && !alertShownRef.current) {
@@ -191,12 +201,14 @@ export const ActiveTicketCard: React.FC<ActiveTicketCardProps> = ({
             const svcName  = activeTicket?.service?.name || "Service";
 
             if (data.status === 'absent') {
-              const absLevel = data.deferral_count ?? 1;
+              const absLevel = data.absent_level ?? data.deferral_count ?? 1;
               setLocalStatus('absent');
-              setLocalDeferralCount(absLevel);
+              setLocalDeferralCount(data.deferral_count ?? localDeferralCount);
+              setLocalAbsentLevel(absLevel);
               if (expiryCheckIntervalRef.current) clearInterval(expiryCheckIntervalRef.current);
               setCalledExpiresAt(null);
               setEnRouteExpiresAt(null);
+              setAbsentExpiresAt(data.absent_expires_at ?? null);
 
               if (alertShownRef.current) return;
               alertShownRef.current = true;
@@ -221,31 +233,33 @@ export const ActiveTicketCard: React.FC<ActiveTicketCardProps> = ({
                   () => {
                     alertShownRef.current = false;
                     useTicketStore.getState().fetchActiveTicket().catch(console.warn);
-                    onTicketExpired?.();
                   }
                 );
               }
 
             } else if (data.status === 'closed' && data.reason === 'expired_absent') {
-              // Expiration définitive — ticket supprimé
+              // Expiration définitive — ticket supprimé immédiatement du store
+              if (activeTicket?.id) removeExpiredTicket(activeTicket.id);
+              setLocalStatus('closed');
+              if (expiryCheckIntervalRef.current) clearInterval(expiryCheckIntervalRef.current);
               if (alertShownRef.current) return;
               alertShownRef.current = true;
-              if (expiryCheckIntervalRef.current) clearInterval(expiryCheckIntervalRef.current);
               showError(
                 "Ticket supprimé",
                 `Le ticket #${ticketNum} (${svcName}) a été définitivement supprimé suite à une absence répétée.`,
                 "OK",
                 () => {
-                  if (activeTicket?.id) removeExpiredTicket(activeTicket.id);
                   onTicketExpired?.();
                 }
               );
 
             } else {
               setLocalStatus(data.status);
+              if (data.absent_level !== undefined) setLocalAbsentLevel(data.absent_level);
               if (data.deferral_count !== undefined) setLocalDeferralCount(data.deferral_count);
               if (data.called_expires_at) setCalledExpiresAt(data.called_expires_at);
               if (data.en_route_expires_at) setEnRouteExpiresAt(data.en_route_expires_at);
+              if (data.absent_expires_at) setAbsentExpiresAt(data.absent_expires_at);
               if (data.status === 'called') {
                 alertShownRef.current = false; // new call — reset alert gate
               }
@@ -312,12 +326,8 @@ export const ActiveTicketCard: React.FC<ActiveTicketCardProps> = ({
     }).start();
   }, [progress]);
 
-  // 2nd-level definitively absent: card hides (handled by store + onTicketExpired alert)
-  if (localStatus === "absent" && localDeferralCount >= 2) {
-    return null;
-  }
-
-  const isTicketAbsentFirst = localStatus === "absent" && localDeferralCount < 2;
+  const isTicketAbsentFirst = localStatus === "absent" && localAbsentLevel < 2;
+  const isTicketAbsentDefinitive = localStatus === "absent" && localAbsentLevel >= 2;
   const isTicketCalledState = localStatus === "called";
   const isTicketEnRoute = localStatus === "en_route";
   const isTicketPresent = localStatus === "present";
@@ -326,6 +336,7 @@ export const ActiveTicketCard: React.FC<ActiveTicketCardProps> = ({
   const canMarkPresent = localStatus === "en_route" || localStatus === "called";
 
   const getStatusConfig = () => {
+    if (isTicketAbsentDefinitive) return { label: "Dernier appel", icon: "person-remove", color: colors.danger, bg: colors.danger + "20" };
     if (isTicketAbsentFirst) return { label: "Absent (rappel possible)", icon: "person-remove", color: colors.warning, bg: colors.warning + "20" };
     if (isTicketPresent) return { label: "Présent", icon: "checkmark-circle", color: colors.success, bg: colors.success + "15" };
     if (isTicketEnRoute) return { label: "En route", icon: "walk", color: colors.warning, bg: colors.warning + "15" };
@@ -334,16 +345,16 @@ export const ActiveTicketCard: React.FC<ActiveTicketCardProps> = ({
   };
 
   const statusConfig = getStatusConfig();
-  const isSpecialStatus = isTicketCalledState || isTicketEnRoute || isTicketPresent || isTicketAbsentFirst;
+  const isSpecialStatus = isTicketCalledState || isTicketEnRoute || isTicketPresent || isTicketAbsentFirst || isTicketAbsentDefinitive;
   const isSoon = position <= 3 && !isSpecialStatus;
 
   const [calledCountdown, setCalledCountdown] = useState<number | null>(null);
   useEffect(() => {
-    if (!isTicketCalledState || !calledExpiresAt) { 
-      setCalledCountdown(null); 
-      return; 
+    if (!isTicketCalledState || !calledExpiresAt) {
+      setCalledCountdown(null);
+      return;
     }
-    const calc = () => Math.max(0, Math.floor((new Date(calledExpiresAt).getTime() - Date.now()) / 1000));
+    const calc = () => Math.max(0, Math.floor((parseExpiry(calledExpiresAt) - Date.now()) / 1000));
     setCalledCountdown(calc());
     const id = setInterval(() => setCalledCountdown(calc()), 1000);
     return () => clearInterval(id);
@@ -436,11 +447,23 @@ export const ActiveTicketCard: React.FC<ActiveTicketCardProps> = ({
       enRouteExpiryAlerted.current = false; 
       return; 
     }
-    const calc = () => Math.max(0, Math.floor((new Date(enRouteExpiresAt).getTime() - Date.now()) / 1000));
+    const calc = () => Math.max(0, Math.floor((parseExpiry(enRouteExpiresAt) - Date.now()) / 1000));
     setEnRouteCountdown(calc());
     const id = setInterval(() => setEnRouteCountdown(calc()), 1000);
     return () => clearInterval(id);
   }, [isTicketEnRoute, enRouteExpiresAt]);
+
+  const [absentCountdown, setAbsentCountdown] = useState<number | null>(null);
+  useEffect(() => {
+    if (!isTicketAbsentDefinitive || !absentExpiresAt) {
+      setAbsentCountdown(null);
+      return;
+    }
+    const calc = () => Math.max(0, Math.floor((parseExpiry(absentExpiresAt) - Date.now()) / 1000));
+    setAbsentCountdown(calc());
+    const id = setInterval(() => setAbsentCountdown(calc()), 1000);
+    return () => clearInterval(id);
+  }, [isTicketAbsentDefinitive, absentExpiresAt]);
 
   const isEnRouteExpiredNow = isTicketEnRoute && enRouteCountdown !== null && enRouteCountdown <= 0;
 
@@ -491,6 +514,7 @@ export const ActiveTicketCard: React.FC<ActiveTicketCardProps> = ({
   ];
 
   const getQueueDisplay = () => {
+    if (isTicketAbsentDefinitive) return { label: "Statut", value: "Absent définitif", color: colors.danger };
     if (isTicketAbsentFirst) return { label: "Statut", value: "Absent", color: colors.warning };
     if (isTicketPresent) return { label: "Statut", value: "Présent", color: colors.success };
     if (isTicketEnRoute) return { label: "Statut", value: "En route", color: colors.warning };
@@ -566,6 +590,15 @@ export const ActiveTicketCard: React.FC<ActiveTicketCardProps> = ({
             <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Estimation</Text>
             <Text style={[styles.statValue, { color: colors.primary }]}>{etaDisplay}</Text>
           </View>
+          {localAbsentLevel > 0 && (
+            <>
+              <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.statItem}>
+                <Text style={[styles.statLabel, { color: colors.textTertiary }]}>Absence</Text>
+                <Text style={[styles.statValue, { color: localAbsentLevel >= 2 ? colors.danger : colors.warning }]}>{localAbsentLevel}/2</Text>
+              </View>
+            </>
+          )}
         </View>
 
         {!isSpecialStatus && (
@@ -619,6 +652,23 @@ export const ActiveTicketCard: React.FC<ActiveTicketCardProps> = ({
           </View>
         )}
 
+        {/* Bannière absence définitive (2e niveau — dernier appel) */}
+        {isTicketAbsentDefinitive && (
+          <View style={[styles.deferredBanner, { backgroundColor: colors.danger + "25", borderColor: colors.danger + "60" }]}>
+            <Ionicons name="warning" size={14} color={colors.danger} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.deferredBannerTitle, { color: colors.danger }]}>
+                Dernier appel — Ticket va être supprimé
+              </Text>
+              <Text style={[styles.deferredBannerSub, { color: colors.textSecondary }]}>
+                {absentCountdown !== null && absentCountdown > 0
+                  ? `Expiration dans ${Math.floor(absentCountdown / 60)}:${String(absentCountdown % 60).padStart(2, "0")}`
+                  : "Expiration immédiate"}
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* When to Leave Alert */}
         {whenToLeave && (
           <View style={[styles.leaveAlert, { backgroundColor: whenToLeave.urgent ? colors.danger + "20" : colors.warning + "20" }]}>
@@ -641,7 +691,7 @@ export const ActiveTicketCard: React.FC<ActiveTicketCardProps> = ({
           </View>
         )}
 
-        {!isTicketPresent && !isTicketEnRoute && (
+        {!isTicketPresent && !isTicketEnRoute && !isTicketAbsentDefinitive && (
           <View style={styles.actionsRow}>
             {canConfirmEnRoute && (
               <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.success + "12" }]} onPress={handleConfirmPresence}>
@@ -703,14 +753,16 @@ export const ActiveTicketCard: React.FC<ActiveTicketCardProps> = ({
           </View>
         )}
       </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.followBtn, { backgroundColor: colors.primary }]}
-        onPress={onPress}
-        activeOpacity={0.8}
-      >
-        <Ionicons name="eye-outline" size={14} color="#FFF" />
-        <Text style={styles.followBtnText}>Suivre ce ticket</Text>
-      </TouchableOpacity>
+      {!isTicketAbsentDefinitive && (
+        <TouchableOpacity
+          style={[styles.followBtn, { backgroundColor: colors.primary }]}
+          onPress={onPress}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="eye-outline" size={14} color="#FFF" />
+          <Text style={styles.followBtnText}>Suivre ce ticket</Text>
+        </TouchableOpacity>
+      )}
       {AlertComponent}
     </>
   );
