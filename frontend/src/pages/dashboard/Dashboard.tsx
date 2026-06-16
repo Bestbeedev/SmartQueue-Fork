@@ -47,6 +47,7 @@ import { ChartContainer } from '@/components/ui/chart-container'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DonutChart, LineChartComponent, VerticalBarChart } from '@/components/ui/charts'
 import { cn } from '@/lib/utils'
@@ -62,6 +63,26 @@ import {
 } from '@/components/ui/table'
 import { Progress } from '@/components/ui/progress'
 
+function getAffluenceBadge(count: number) {
+  if (count >= 10) return { label: 'Élevée', className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-red-200' }
+  if (count >= 5) return { label: 'Modérée', className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border-amber-200' }
+  return { label: 'Faible', className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-green-200' }
+}
+
+const openAffluence = async (service: any, setService: any, setData: any, setLoading: any) => {
+  setService(service);
+  setData(null);
+  setLoading(true);
+  try {
+    const { data } = await api.get(`/api/services/${service.id}/affluence`);
+    setData(data);
+  } catch {
+    setData(null);
+  } finally {
+    setLoading(false);
+  }
+};
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const [stats, setStats] = useState<any>(null)
@@ -69,7 +90,7 @@ export default function Dashboard() {
   const [services, setServices] = useState<any[]>([])
   const [serviceDistribution, setServiceDistribution] = useState<any[]>([])
   const [agentsDistribution, setAgentsDistribution] = useState<any[]>([])
-  const [recommendations, setRecommendations] = useState<any[]>([])
+  const [overviewAffluence, setOverviewAffluence] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [seriesLoading, setSeriesLoading] = useState(false)
   const [servicesLoading, setServicesLoading] = useState(false)
@@ -84,6 +105,9 @@ export default function Dashboard() {
   const [notificationsLoading, setNotificationsLoading] = useState(false)
   const [serviceStats, setServiceStats] = useState<Record<number, any>>({})
   const [activeTab, setActiveTab] = useState('overview')
+  const [affluenceService, setAffluenceService] = useState<any>(null)
+  const [affluenceData, setAffluenceData] = useState<any>(null)
+  const [affluenceLoading, setAffluenceLoading] = useState(false)
 
   const role = useAppSelector((s) => s.auth.user?.role)
   const user = useAppSelector((s) => s.auth.user)
@@ -206,10 +230,10 @@ export default function Dashboard() {
       if (servicesData.length > 0) {
         const firstService = servicesData[0]
         try {
-          const recommendationsResponse = await api.get(`/api/services/${firstService.id}/recommendations`)
-          setRecommendations(recommendationsResponse.data.windows || [])
-        } catch (error) {
-          setRecommendations([])
+          const { data } = await api.get(`/api/services/${firstService.id}/affluence`)
+          setOverviewAffluence(data)
+        } catch {
+          setOverviewAffluence(null)
         }
       }
     } catch (error) {
@@ -1115,6 +1139,9 @@ export default function Dashboard() {
                         <Progress value={rate} className="h-2" />
                         <div className="flex items-center gap-4 text-xs text-muted-foreground">
                           <span>{service.people_waiting || 0} en attente</span>
+                          <Badge variant="outline" className={cn('text-xs', getAffluenceBadge(service.people_waiting || 0).className)}>
+                            {getAffluenceBadge(service.people_waiting || 0).label}
+                          </Badge>
                           <span>{service.agents_count || 0} agents</span>
                         </div>
                       </div>
@@ -1199,6 +1226,9 @@ export default function Dashboard() {
                                 <Ticket className="h-3 w-3" />
                                 {service.people_waiting || 0} en attente
                               </span>
+                              <Badge variant="outline" className={cn('text-xs', getAffluenceBadge(service.people_waiting || 0).className)}>
+                                {getAffluenceBadge(service.people_waiting || 0).label}
+                              </Badge>
                             </div>
                           </div>
                         </div>
@@ -1211,6 +1241,9 @@ export default function Dashboard() {
                               Prioritaire
                             </Badge>
                           )}
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openAffluence(service, setAffluenceService, setAffluenceData, setAffluenceLoading)} title="Voir les créneaux d'affluence">
+                            <BarChart3 className="h-4 w-4" />
+                          </Button>
                         </div>
                       </div>
                     ))}
@@ -1340,32 +1373,53 @@ export default function Dashboard() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Bell className="h-5 w-5" />
-                  Recommandations horaires
+                  Créneaux d'affluence
                 </CardTitle>
+                <CardDescription>
+                  Basé sur l'historique des 30 derniers jours
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {Array.isArray(recommendations) && recommendations.length > 0 ? (
-                    recommendations.map((rec: any, index: number) => (
-                      <div key={index} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <div className="w-2 h-2 bg-green-500 rounded-full" />
-                          <div>
-                            <p className="font-medium">{rec.start} - {rec.end}</p>
-                            <p className="text-sm text-muted-foreground">{rec.reason}</p>
-                          </div>
-                        </div>
-                        <Badge variant="outline" className="text-green-600 border-green-600">
-                          Faible affluence
-                        </Badge>
+                {overviewAffluence ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3 p-3 bg-muted/30 rounded-lg">
+                      <div className={cn(
+                        "w-2 h-2 rounded-full shrink-0",
+                        overviewAffluence.level === 'high' ? 'bg-red-500' : overviewAffluence.level === 'medium' ? 'bg-amber-500' : 'bg-green-500'
+                      )} />
+                      <div className="flex-1">
+                        <p className="font-medium">
+                          Affluence {overviewAffluence.level === 'high' ? 'élevée' : overviewAffluence.level === 'medium' ? 'modérée' : 'faible'}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {overviewAffluence.people ?? 0} en attente · ~{overviewAffluence.eta_avg ?? '--'} min d'attente
+                        </p>
                       </div>
-                    ))
-                  ) : (
-                    <div className="h-[120px] w-full flex items-center justify-center text-sm text-muted-foreground">
-                      Aucune donnée.
                     </div>
-                  )}
-                </div>
+
+                    {overviewAffluence.peak_hours?.high?.length > 0 && (
+                      <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                        <p className="text-sm font-medium text-red-700 dark:text-red-400 mb-1">Heures de pointe 🔴</p>
+                        <p className="text-sm text-muted-foreground">
+                          {overviewAffluence.peak_hours.high.map((h: number) => `${String(h).padStart(2, '0')}h`).join(', ')}
+                        </p>
+                      </div>
+                    )}
+
+                    {overviewAffluence.peak_hours?.low?.length > 0 && (
+                      <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                        <p className="text-sm font-medium text-green-700 dark:text-green-400 mb-1">Heures calmes 🟢</p>
+                        <p className="text-sm text-muted-foreground">
+                          {overviewAffluence.peak_hours.low.map((h: number) => `${String(h).padStart(2, '0')}h`).join(', ')}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="h-[120px] w-full flex items-center justify-center text-sm text-muted-foreground">
+                    Aucune donnée.
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -1564,6 +1618,78 @@ export default function Dashboard() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Affluence Dialog */}
+      <Dialog open={!!affluenceService} onOpenChange={(open) => { if (!open) setAffluenceService(null); }}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Affluence — {affluenceService?.name}</DialogTitle>
+            <DialogDescription>
+              Distribution horaire des tickets sur les 30 derniers jours
+            </DialogDescription>
+          </DialogHeader>
+          {affluenceLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : affluenceData ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-muted/30 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold">{affluenceData.people ?? 0}</p>
+                  <p className="text-xs text-muted-foreground">En attente</p>
+                </div>
+                <div className="bg-muted/30 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold">~{affluenceData.eta_avg ?? '--'} min</p>
+                  <p className="text-xs text-muted-foreground">Attente moyenne</p>
+                </div>
+                <div className="bg-muted/30 rounded-lg p-4 text-center">
+                  <div className="flex items-center justify-center gap-2 mb-1">
+                    <div className={cn('w-3 h-3 rounded-full', affluenceData.level === 'high' ? 'bg-red-500' : affluenceData.level === 'medium' ? 'bg-amber-500' : 'bg-green-500')} />
+                    <p className="text-2xl font-bold">{affluenceData.level === 'high' ? 'Élevée' : affluenceData.level === 'medium' ? 'Modérée' : 'Faible'}</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Niveau d'affluence</p>
+                </div>
+              </div>
+
+              {affluenceData.hourly_data && affluenceData.hourly_data.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-semibold mb-2">Créneaux horaires (30 jours)</h4>
+                  <ChartContainer title="" description="">
+                    <VerticalBarChart
+                      data={affluenceData.hourly_data.map((pt: any) => ({
+                        name: `${String(pt.hour).padStart(2, '0')}h`,
+                        value: pt.count,
+                        color: affluenceData.peak_hours?.high?.includes(pt.hour) ? '#ef4444'
+                          : affluenceData.peak_hours?.medium?.includes(pt.hour) ? '#f59e0b'
+                          : '#22c55e60',
+                      }))}
+                      height={220}
+                    />
+                  </ChartContainer>
+                  <div className="flex items-center justify-center gap-6 mt-2">
+                    <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-red-500" /><span className="text-xs text-muted-foreground">Peak</span></div>
+                    <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-amber-500" /><span className="text-xs text-muted-foreground">Moyen</span></div>
+                    <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-green-500/40" /><span className="text-xs text-muted-foreground">Calme</span></div>
+                  </div>
+                </div>
+              )}
+
+              {affluenceData.peak_hours?.high?.length > 0 && (
+                <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
+                  <Lightbulb className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+                  <p className="text-sm text-muted-foreground">
+                    Heures de pointe : {affluenceData.peak_hours.high.map((h: number) => `${String(h).padStart(2, '0')}h`).join(', ')}.
+                    Prévoyez des ressources supplémentaires sur ces créneaux.
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-center py-8 text-muted-foreground">Impossible de charger les données d'affluence.</p>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

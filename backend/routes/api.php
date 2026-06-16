@@ -39,6 +39,7 @@ use App\Http\Controllers\Api\ReviewController;
 use App\Http\Controllers\Api\Admin\ReviewController as AdminReviewController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\ForgotPasswordController;
+use App\Http\Controllers\Api\FavoriteController;
 
 /*
 |--------------------------------------------------------------------------
@@ -88,6 +89,7 @@ Route::get('services/{id}', [ServiceController::class, 'show']);
 Route::get('services/{id}/affluence', [ServiceController::class, 'affluence']);
 Route::get('services/{id}/recommendations', [ServiceController::class, 'recommendations']);
 Route::get('services/{id}/availability', [ServiceController::class, 'availability']);
+Route::get('services/{id}/reviews', [ReviewController::class, 'index']);
 
 // Espace utilisateur authentifié (tickets)
 Route::middleware('auth:sanctum')->group(function () {
@@ -120,6 +122,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/notification-preferences', [NotificationPreferencesController::class, 'show']);
     Route::put('/notification-preferences', [NotificationPreferencesController::class, 'update']);
 
+    // Favoris établissements
+    Route::get('/favorites', [FavoriteController::class, 'index']);
+    Route::post('/favorites/{establishment}', [FavoriteController::class, 'store']);
+    Route::delete('/favorites/{establishment}', [FavoriteController::class, 'destroy']);
+    Route::get('/favorites/{establishment}/status', [FavoriteController::class, 'status']);
 
     // Espace agent / admin (gestion des files en temps réel)
     Route::middleware('role:agent,admin')->group(function () {
