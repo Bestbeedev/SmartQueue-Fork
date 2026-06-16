@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Ticket;
 use App\Models\Service;
 use App\Services\TicketService;
+use App\Services\AlertService;
 use App\Events\TicketUpdated;
 use App\Events\UserTicketUpdated;
 use App\Events\UserEnRoute;
@@ -452,19 +453,19 @@ class TicketRecallController extends Controller
             ]);
         }
 
-        // Use called_expires_at if available, fall back to global config
-        if ($ticket->called_expires_at) {
-            $remaining = max(0, now()->diffInSeconds($ticket->called_expires_at, false));
-        } else {
-            $timeoutSeconds = (int) config('queue.call_timeout_seconds', 600);
-            $calledAt = $ticket->called_at ?? now();
-            $elapsed = now()->diffInSeconds($calledAt);
-            $remaining = max(0, $timeoutSeconds - $elapsed);
-        }
-
         $service = $ticket->service;
-        $timeoutMinutes = $service->call_timeout_minutes
-            ?? (int) ceil((int) config('queue.call_timeout_seconds', 600) / 60);
+        $timeoutMinutes = max(1, $service->call_timeout_minutes
+            ?? (int) ceil((int) config('queue.call_timeout_seconds', 600) / 60));
+        $timeoutSeconds = $timeoutMinutes * 60;
+
+        // Use called_at-based elapsed time to avoid datetime second-truncation issues:
+        // when called_expires_at is stored as datetime (no microseconds), now() can appear
+        // later by <1s, causing diffInSeconds to return -1 → clamped to 0 → false "expiré".
+        // NB: Carbon 3 diffInSeconds is SIGNED — compute elapsed in the calledAt→now
+        // direction (positive) so remaining = timeout - elapsed, not timeout + elapsed.
+        $calledAt = $ticket->called_at ?? $ticket->created_at;
+        $elapsed = (int) $calledAt->diffInSeconds(now());
+        $remaining = max(0, $timeoutSeconds - $elapsed);
 
         return response()->json([
             'is_called' => $ticket->status === 'called',
